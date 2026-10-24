@@ -46,6 +46,9 @@ class Region:
     area: float
     rms_mm: float = 0.0
     max_dev_mm: float = 0.0
+    bow_mm: float = 0.0
+    """RMS distance from the plane leaving out stray points (a seam, a sliver of the next
+    face): how far the face itself bows."""
     neighbours: set[int] = field(default_factory=set)
 
 
@@ -383,3 +386,5 @@ def update_deviation(mesh: trimesh.Trimesh, regions: list[Region]) -> None:
         d = r.plane.distance(mesh.vertices[np.unique(mesh.faces[r.faces])])
         r.rms_mm = float(np.sqrt(np.mean(d**2)))
         r.max_dev_mm = float(np.abs(d).max())
+        keep = _inliers(d, np.ones(len(d)))
+        r.bow_mm = r.rms_mm if keep is None else float(np.sqrt(np.mean(d[keep] ** 2)))

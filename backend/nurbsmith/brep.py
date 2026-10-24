@@ -166,7 +166,7 @@ def check_supported(
             if nb in by_id and cos_parallel > r.plane.normal @ by_id[nb].plane.normal > cos_min:
                 # The smaller of the two is the facet; the bigger is usually a real face.
                 curved.add(min((r, by_id[nb]), key=lambda x: x.area).id)
-        if r.rms_mm > max(CURVED_TOL_RATIO * level.fit_tolerance_mm, WARP_SHARE * np.sqrt(r.area)):
+        if r.bow_mm > max(CURVED_TOL_RATIO * level.fit_tolerance_mm, WARP_SHARE * np.sqrt(r.area)):
             curved.add(r.id)
     if not curved and not unmodelled:
         return None

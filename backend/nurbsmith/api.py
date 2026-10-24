@@ -17,6 +17,7 @@ from fastapi.responses import FileResponse
 from . import __version__
 from .brep import UnsupportedGeometry
 from .convert import convert
+from .merge import MergeError, merge_scans
 from .mesh_io import SUPPORTED_FORMATS, MeshLoadError, load_mesh, summarize
 from .quality import deviation_colors
 from .step_io import write_step
@@ -83,12 +84,23 @@ async def convert_mesh(
     file: UploadFile = File(...),
     level: str = Form(DEFAULT_LEVEL.key),
     units: str = Form("mm"),
+    second_file: UploadFile | None = File(None),
 ) -> dict:
+    """Convert a scan. second_file is an optional scan of the other side of the same part
+    (the bottom, or the back); it is lined up with the first and merged before converting."""
     try:
         tol = get_level(level)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     mesh = await _read_mesh(file, units)
+    merged = None
+    if second_file is not None:
+        other = await _read_mesh(second_file, units)
+        try:
+            merged = await run_in_threadpool(merge_scans, mesh, other)
+        except MergeError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        mesh = merged.mesh
     try:
         result = await run_in_threadpool(convert, mesh, tol)
     except UnsupportedGeometry as exc:
@@ -110,10 +122,13 @@ async def convert_mesh(
     _remember(result_id, folder)
 
     stem = re.sub(r"[^A-Za-z0-9._-]+", "_", Path(file.filename or "model").stem) or "model"
+    report = result.report()
+    if merged is not None:
+        report["merge"] = merged.report()
     return {
         "id": result_id,
         "level": tol.as_dict(),
-        "report": result.report(),
+        "report": report,
         "downloads": {
             "step": f"/api/results/{result_id}/{stem}.step",
             "model_stl": f"/api/results/{result_id}/model.stl",

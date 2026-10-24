@@ -59,5 +59,33 @@ def test_convert_curved_part_is_a_clear_422():
     assert "curved" in res.json()["detail"]
 
 
+def test_convert_merges_a_second_scan():
+    top, bottom = (fixtures.subdivided(s, 1.0) for s in fixtures.sides(fixtures.l_bracket()))
+    bottom = fixtures.rotated(bottom, seed=3)
+    bottom.apply_translation([30.0, -10.0, 5.0])
+    res = client.post(
+        "/api/convert",
+        files={
+            "file": ("top.stl", top.export(file_type="stl")),
+            "second_file": ("bottom.stl", bottom.export(file_type="stl")),
+        },
+    )
+    assert res.status_code == 200, res.text
+    report = res.json()["report"]
+    assert report["face_types"] == {"PLANE": 8}
+    assert report["fit"]["within_tolerance_pct"] > 99
+    assert report["merge"]["overlap_pct"] > 5
+
+
+def test_scans_that_cannot_be_merged_are_a_clear_422():
+    small = fixtures.ball(radius=10.0, squash=1.0).export(file_type="stl")
+    big = fixtures.ball(radius=40.0, squash=1.0).export(file_type="stl")
+    res = client.post(
+        "/api/convert", files={"file": ("a.stl", small), "second_file": ("b.stl", big)}
+    )
+    assert res.status_code == 422
+    assert "overlap" in res.json()["detail"]
+
+
 def test_unknown_result_404():
     assert client.get("/api/results/nope/model.step").status_code == 404

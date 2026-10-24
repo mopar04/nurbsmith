@@ -2,6 +2,19 @@
 
 Newest first. One entry per choice a later session should not have to relitigate.
 
+## 2026-10-24 (merging scans)
+- **We merge top and bottom scans ourselves** (Zac agreed). Scanner software's merge was off
+  by about 1 mm and 1.6 degrees on the calibration print, which reads as wrong thickness.
+  The user uploads both scans; no manual point picking.
+- **No open3d.** Its wheels need libEGL (a GPU stack) on the server. ICP is a short numpy /
+  scipy routine instead.
+- **A merge is judged by what it completes, not just overlap:** rim continuation and an
+  open-air penalty. Overlap alone prefers stacking a flat part's bottom on its top.
+- **Symmetric parts can land half-turned.** From below, a symmetric part looks the same
+  turned round, so tests check that the placed scan lies on the part, not point for point.
+- **Freeform check uses a face's bow without stray points**, so a warped print's underside
+  stays one plane.
+
 ## 2026-10-24 (calibration part)
 - **Hole sizes snap only within 0.35x the tolerance** on the diameter (0.1 mm at Functional),
   stricter than other sizes. Stamped, printed and cast holes are rarely drill sizes, and a
