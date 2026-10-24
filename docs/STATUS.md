@@ -1,6 +1,6 @@
 # Status
 
-_Last updated: 2026-10-24 (later)_
+_Last updated: 2026-10-24 (calibration part)_
 
 ## Done
 - **M0 scaffold:** API, mesh loading, viewer, Docker, CI.
@@ -10,9 +10,10 @@ _Last updated: 2026-10-24 (later)_
   - Cylinder finding (`cylinders.py`): pairs of planar strips seed a cylinder fit, which is
     grown over triangles and refitted. Checks reject gentle curves that fit a plane, wide
     "cylinders" fitted to a few big flat triangles, and corners passing as one gentle cylinder.
-  - Features (`features.py`): through and blind holes, bosses, fillets, and round bodies. Hole
-    sizes snap to standard metric clearance / close fit / tap drill and inch sizes, only
-    within half the tolerance. Fillets below the level's smallest radius are made sharp.
+  - Features (`features.py`): through and blind holes, counterbores, slots, bosses, fillets,
+    chamfers and round bodies. Hole sizes snap to standard metric clearance / close fit / tap
+    drill and inch sizes only within 0.35x the tolerance, otherwise they are kept as measured.
+    Fillets below the level's smallest radius are made sharp.
   - Base solid: the exact plane-intersection rebuild, with a fallback (`cells.py`) that cuts a
     block with the fitted planes near their regions and keeps the inside blocks. The fallback
     survives gaps, warps and ragged rims, and keeps each separate body of an assembly scan.
@@ -50,6 +51,19 @@ _Last updated: 2026-10-24 (later)_
   - Stray zero-length edges no longer break fillets.
   - The scan of the holder converts at 87%. Its deep pockets were not fully scanned, which
     Zac says is a coverage problem, not ours.
+
+- **Calibration part** (`tools/calibration_part.py`, 19 known features; Zac is printing and
+  scanning it). The design mesh went from 90% to 98% within 0.3 mm at Functional. Now right:
+  seven of the eight holes including the non-standard 7.3 mm one, the counterbore (10 mm, 4 deep, over
+  5.5 mm), the blind hole depth (5.0), the slot (6 × 20), the boss (16 × 20) with its cross
+  hole, the thin wall, the r8 and r3 corner fillets and the 1.5 mm chamfers. Still wrong:
+  - the countersunk hole: no cone feature yet, and the cone muddles the 4.5 mm hole under it,
+    which is left out,
+  - the corner blends where the r8 fillets meet the top chamfer (read as r11 fillets), and some
+    fillets and chamfers that don't apply together,
+  - the rounded pocket corners (rebuilt as small flats),
+  - the ramp's overhanging end, which leaves a top face that OpenCASCADE's mesher can't
+    tessellate in memory (it does after STEP export).
 
 ## Next (M2.5: real-scan readiness, agreed with Zac)
 - Thin walls: detect wall pairs, measure thickness, patch missing wall areas from it (bin).

@@ -12,7 +12,7 @@ import trimesh
 from .brep import UnsupportedGeometry, check_supported, merge_coplanar, rebuild_solid, snap_planes
 from .cells import Corner, cell_solid
 from .cylinders import consolidate, find_cylinders, planes_around, shared_lengths
-from .features import Feature, apply_features, cylinder_between, plan_features
+from .features import EDGE_KINDS, Feature, apply_features, cylinder_between, plan_features
 from .quality import FitScore, ScanQuality, deviations, fit_score, scan_quality
 from .segment import Geo, Region, segment_planes
 from .step_io import face_type_counts
@@ -193,11 +193,19 @@ def convert(mesh: trimesh.Trimesh, level: ToleranceLevel) -> ConversionResult:
     other_side = {
         f.patch: {f.planes[0]: f.planes[1], f.planes[1]: f.planes[0]}
         for f in features
-        if f.kind in ("fillet", "sharp")
+        if f.kind in EDGE_KINDS
     }
 
+    base_ids = {r.id for r in base_planes}
+
     def through(rid: int, nb: int) -> int | None:
-        return other_side.get(nb, {}).get(rid)
+        # Across a fillet or chamfer to the plane beyond, and across a chamfer beyond that
+        # (a small round on a chamfer's edge).
+        for _ in range(3):
+            nb = other_side.get(nb, {}).get(rid)
+            if nb is None or nb in base_ids:
+                return nb
+        return None
 
     body = next((f for f in features if f.kind == "body"), None)
     try:
@@ -211,18 +219,30 @@ def convert(mesh: trimesh.Trimesh, level: ToleranceLevel) -> ConversionResult:
         plane_by_id = {r.id: r for r in planes}
         corners = [
             Corner(
-                patch_by_id[f.patch].faces,
+                plane_by_id[f.patch].faces if f.kind == "chamfer" else patch_by_id[f.patch].faces,
                 plane_by_id[f.planes[0]],
                 plane_by_id[f.planes[1]],
-                patch_by_id[f.patch].convex,
+                f.kind == "chamfer" or patch_by_id[f.patch].convex,
             )
             for f in features
-            if f.kind in ("fillet", "sharp")
+            if f.kind in EDGE_KINDS
         ]
         fixed = [
             (patch_by_id[f.patch].faces, f.kind == "hole")
             for f in features
             if f.kind in ("hole", "boss")
+        ]
+        # A slot is cut afterwards, so its walls and ends are inside the base.
+        fixed += [
+            (
+                np.concatenate(
+                    [patch_by_id[i].faces for i in (f.patch, *f.also)]
+                    + [plane_by_id[i].faces for i in f.planes]
+                ),
+                True,
+            )
+            for f in features
+            if f.kind == "slot"
         ]
         base = cell_solid(
             work, base_planes, working.fit_tolerance_mm, working.min_feature_mm, corners, fixed

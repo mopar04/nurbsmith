@@ -20,7 +20,7 @@ from OCP.TopAbs import TopAbs_SHELL
 from OCP.TopExp import TopExp_Explorer
 from OCP.TopoDS import TopoDS
 
-from .segment import Plane, Region, face_labels, update_deviation
+from .segment import Plane, Region, face_labels, plane_offset, update_deviation
 from .tolerance import ToleranceLevel
 
 # Adjacent regions meeting at less than this (but not parallel) are a curved surface faceted
@@ -92,8 +92,7 @@ def snap_planes(mesh: trimesh.Trimesh, regions: list[Region], level: ToleranceLe
     for r in regions:
         ci, sign = assignment[r.id]
         normal = sign * clusters[ci].direction
-        verts = mesh.vertices[np.unique(mesh.faces[r.faces])]
-        r.plane = Plane(normal, float(np.mean(verts @ normal)))
+        r.plane = Plane(normal, plane_offset(mesh, r.faces, normal))
         r.cluster = ci  # type: ignore[attr-defined]
 
 
@@ -130,8 +129,7 @@ def merge_coplanar(
     for new_id, group in enumerate(groups.values()):
         faces = np.concatenate([g.faces for g in group])
         normal = group[0].plane.normal
-        verts = mesh.vertices[np.unique(mesh.faces[faces])]
-        plane = Plane(normal, float(np.mean(verts @ normal)))
+        plane = Plane(normal, plane_offset(mesh, faces, normal))
         merged.append(Region(new_id, faces, plane, float(mesh.area_faces[faces].sum())))
     labels = face_labels(merged, len(mesh.faces))
     a = labels[mesh.face_adjacency[:, 0]]
@@ -284,8 +282,10 @@ def rebuild_solid(
                     seq.append((v, nb))
             if len(seq) > 1 and seq[0][1] == seq[-1][1]:
                 seq[0] = seq.pop()
-            if not seq:
-                continue  # the rim of a hole: the face is rebuilt without it
+            if len(seq) < 2:
+                # The rim of a hole, or a sliver of the face cut off along one edge (between
+                # a fillet and a chamfer): the face is rebuilt without it.
+                continue
             if len(seq) < 3:
                 raise UnsupportedGeometry(
                     f"Flat region {rid} meets fewer than 3 neighbours along one boundary; "

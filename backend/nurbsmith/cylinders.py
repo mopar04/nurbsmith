@@ -49,6 +49,13 @@ NORMAL_TURN_MAX = 2.0
 # Above this share of the part's size, a radius spanning under this coverage is a bowed wall.
 WARP_RADIUS_SHARE = 0.25
 WARP_MAX_COVERAGE = 0.15
+# A part-way curve must have at least this share of its area facing the middle of its turn.
+MIN_MIDDLE = 0.15
+# On a cylinder each face's normal points straight out from the axis. A run of flat faces and
+# tight corners (a pocket end, a cone, a corner blend) can lie near a cylinder while its normals
+# lag behind; the steady lag, as a share of the arc the patch spans, measured in slices.
+MAX_NORMAL_LAG = 0.12
+LAG_SLICES = 6
 
 
 @dataclass
@@ -272,10 +279,64 @@ def _describe(
     most = NORMAL_TURN_MAX * len(sectors) + 2 if normals is not None else COVERAGE_SECTORS
     if not NORMAL_TURN_SHARE * len(sectors) <= len(turned) <= most:
         return None
+    # A curve turns steadily; a crease (a wall meeting a chamfer) jumps from one direction to
+    # the other, with hardly any surface facing in between. This and the lag check need
+    # smoothed normals too, and a full circle needs neither.
+    partial = normals is not None and coverage < FULL_COVERAGE
+    if partial and _middle_share(turn, mesh.area_faces[faces]) < MIN_MIDDLE:
+        return None
+    if partial and _normal_lag(cyl, centres, n, convex, mesh.area_faces[faces]) > (
+        MAX_NORMAL_LAG * _arc(angles)
+    ):
+        return None
 
     t = rel @ cyl.axis
     rms = float(np.sqrt(np.mean(cyl.distance(pts) ** 2)))
     return CurvedPatch(pid, faces, cyl, convex, coverage, (float(t.min()), float(t.max())), rms)
+
+
+def _normal_lag(
+    cyl: Cylinder, centres: np.ndarray, normals: np.ndarray, convex: bool, weights: np.ndarray
+) -> float:
+    """Largest steady lag, in turns, of the face normals behind the radial direction.
+
+    The patch is cut into slices along its arc and the signed lag averaged in each: noise
+    averages out, while a flat stretch (whose normal stays put as the arc moves on) does not."""
+    u, v = _basis(cyl.axis)
+    rel = centres - cyl.point
+    pos = np.arctan2(rel @ v, rel @ u)
+    lag = np.arctan2(normals @ v, normals @ u) + (0.0 if convex else np.pi) - pos
+    lag = (lag + np.pi) % (2 * np.pi) - np.pi
+    mid = np.arctan2(
+        np.average(np.sin(pos), weights=weights), np.average(np.cos(pos), weights=weights)
+    )
+    pos = (pos - mid + np.pi) % (2 * np.pi) - np.pi
+    lo, hi = np.percentile(pos, [2, 98])
+    slices = np.clip(((pos - lo) / max(hi - lo, 1e-9) * LAG_SLICES).astype(int), 0, LAG_SLICES - 1)
+    worst = 0.0
+    for k in range(LAG_SLICES):
+        here = slices == k
+        if here.sum() > 3:
+            worst = max(worst, abs(float(np.average(lag[here], weights=weights[here]))))
+    return worst / (2 * np.pi)
+
+
+def _arc(angles: np.ndarray) -> float:
+    """Arc the angles span, in turns."""
+    mid = np.arctan2(np.sin(angles).mean(), np.cos(angles).mean())
+    rel = (angles - mid + np.pi) % (2 * np.pi) - np.pi
+    lo, hi = np.percentile(rel, [2, 98])
+    return float(hi - lo) / (2 * np.pi)
+
+
+def _middle_share(angles: np.ndarray, weights: np.ndarray) -> float:
+    """Share of the weight facing the middle third of the angles' range."""
+    mean = np.arctan2(np.average(np.sin(angles), weights=weights),
+                      np.average(np.cos(angles), weights=weights))  # fmt: skip
+    rel = (angles - mean + np.pi) % (2 * np.pi) - np.pi
+    lo, hi = np.percentile(rel, [2, 98])
+    middle = np.abs(rel - (lo + hi) / 2) <= (hi - lo) / 6
+    return float(weights[middle].sum() / weights.sum())
 
 
 def _basis(axis: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -342,7 +403,15 @@ def planes_around(
             if len(nbrs) == 1 and nbrs[0][1] < offset:
                 target = nbrs[0][1]
             else:
-                pts = mesh.vertices[np.unique(mesh.faces[combined == i])]
+                # Triangle centres too: a boss top tessellated as a fan has all its corners
+                # on the rim, so on the cylinder.
+                faces = combined == i
+                pts = np.vstack(
+                    [
+                        mesh.vertices[np.unique(mesh.faces[faces])],
+                        mesh.vertices[mesh.faces[faces]].mean(axis=1),
+                    ]
+                )
                 for _, j in sorted(nbrs, reverse=True):
                     if j >= offset:
                         cyl = patches[j - offset].cylinder
@@ -366,7 +435,12 @@ def planes_around(
         faces = np.flatnonzero(combined == old)
         plane_of[faces] = new_id
         out.append(
-            Region(new_id, faces, oriented_plane(mesh, faces), float(mesh.area_faces[faces].sum()))
+            Region(
+                new_id,
+                faces,
+                oriented_plane(mesh, faces, robust=True),
+                float(mesh.area_faces[faces].sum()),
+            )
         )
     update_deviation(mesh, out)
     return out, plane_of
@@ -481,6 +555,9 @@ def consolidate(
     for r in planes:
         round_nbrs = [by_id[n] for n in r.neighbours if isinstance(by_id[n], CurvedPatch)]
         if len(round_nbrs) < 2 or len(round_nbrs) < len(r.neighbours) - 1:
+            continue
+        # A flat ring between holes or bosses (a counterbore's floor) is a face of its own.
+        if any(p.coverage >= FULL_COVERAGE for p in round_nbrs):
             continue
         if r.area > sum((2 * p.cylinder.radius) ** 2 for p in round_nbrs):
             continue

@@ -22,6 +22,9 @@ MAX_GROW_ANGLE_DEG = 25.0
 SMOOTHING_ROUNDS = 8
 # Neighbours whose normals differ by more than this are across an edge: not averaged.
 SMOOTHING_KEEP_DEG = 60.0
+# Plane fits are redone without points this many median deviations off, this many times.
+OUTLIER_MADS = 4.0
+PLANE_REFITS = 2
 
 
 @dataclass
@@ -82,14 +85,63 @@ def fit_plane(points: np.ndarray, weights: np.ndarray | None = None) -> Plane:
     return Plane(normal / np.linalg.norm(normal), float(normal @ centroid))
 
 
-def oriented_plane(mesh: Geo | trimesh.Trimesh, faces: np.ndarray) -> Plane:
-    """Fit a plane to the given faces, with its normal agreeing with the face normals."""
-    verts = mesh.vertices[np.unique(mesh.faces[faces])]
-    plane = fit_plane(verts)
+def oriented_plane(mesh: Geo | trimesh.Trimesh, faces: np.ndarray, robust: bool = False) -> Plane:
+    """Fit a plane to the given faces, with its normal agreeing with the face normals.
+
+    robust is for a region's final plane: each vertex counts for the area around it, so
+    finely tessellated detail (embossed text, a dense patch of scan) does not outweigh the
+    broad faces of the plane, and the fit is redone without outliers (text on the face, the
+    edge of a fillet it was grown into). Region growing keeps the plain fit it was tuned on."""
+    if robust:
+        pts, weights = _weighted_vertices(mesh, faces)
+    else:
+        pts = mesh.vertices[np.unique(mesh.faces[faces])]
+        weights = np.ones(len(pts))
+    plane = fit_plane(pts, weights)
+    for _ in range(PLANE_REFITS if robust else 0):
+        keep = _inliers(plane.distance(pts), weights)
+        if keep is None:
+            break
+        plane = fit_plane(pts[keep], weights[keep])
     mean_normal = (mesh.face_normals[faces] * mesh.area_faces[faces, None]).sum(axis=0)
     if plane.normal @ mean_normal < 0:
         plane = Plane(-plane.normal, -plane.offset)
     return plane
+
+
+def plane_offset(mesh: Geo | trimesh.Trimesh, faces: np.ndarray, normal: np.ndarray) -> float:
+    """Offset of the plane with the given normal through these faces, weighted and with
+    outliers left out as in oriented_plane."""
+    pts, weights = _weighted_vertices(mesh, faces)
+    d = pts @ normal
+    keep = _inliers(d - np.average(d, weights=weights), weights)
+    if keep is not None:
+        d, weights = d[keep], weights[keep]
+    return float(np.average(d, weights=weights))
+
+
+def _weighted_vertices(mesh: Geo | trimesh.Trimesh, faces: np.ndarray):
+    corners = mesh.faces[faces]
+    verts, idx = np.unique(corners, return_inverse=True)
+    weights = np.bincount(idx.ravel(), np.repeat(mesh.area_faces[faces] / 3, 3), len(verts))
+    return mesh.vertices[verts], weights + 1e-12
+
+
+def _inliers(d: np.ndarray, weights: np.ndarray) -> np.ndarray | None:
+    """Points within a few median deviations of the median, or None if that leaves out
+    nothing, or too much to trust."""
+    mid = _weighted_median(d, weights)
+    spread = _weighted_median(np.abs(d - mid), weights)
+    keep = np.abs(d - mid) <= OUTLIER_MADS * spread + 1e-3
+    if keep.all() or keep.sum() < 3 or weights[keep].sum() < 0.5 * weights.sum():
+        return None
+    return keep
+
+
+def _weighted_median(values: np.ndarray, weights: np.ndarray) -> float:
+    order = np.argsort(values)
+    cum = np.cumsum(weights[order])
+    return float(values[order][np.searchsorted(cum, 0.5 * cum[-1])])
 
 
 def segment_planes(mesh: trimesh.Trimesh, level: ToleranceLevel) -> list[Region]:
@@ -317,7 +369,7 @@ def _build_regions(mesh: Geo, labels: np.ndarray) -> list[Region]:
     regions: list[Region] = []
     for rid in range(dense.max() + 1):
         faces = np.flatnonzero(dense == rid)
-        plane = oriented_plane(mesh, faces)
+        plane = oriented_plane(mesh, faces, robust=True)
         regions.append(Region(rid, faces, plane, float(mesh.area_faces[faces].sum())))
     for a, b in _region_adjacency(mesh, dense):
         regions[a].neighbours.add(b)

@@ -63,7 +63,7 @@ def test_rough_level_leaves_fillets_out():
     result = convert(scanned(fx.filleted_block, 0.05), LEVELS["rough"])
     assert result.solid.isValid()
     assert set(face_type_counts(result.solid)) == {"PLANE"}
-    assert result.report()["features"] == []
+    assert all(f["type"] != "fillet" for f in result.report()["features"])
 
 
 def test_snapping_stays_within_tolerance():

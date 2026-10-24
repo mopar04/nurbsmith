@@ -2,6 +2,24 @@
 
 Newest first. One entry per choice a later session should not have to relitigate.
 
+## 2026-10-24 (calibration part)
+- **Hole sizes snap only within 0.35x the tolerance** on the diameter (0.1 mm at Functional),
+  stricter than other sizes. Stamped, printed and cast holes are rarely drill sizes, and a
+  size Zac measures with calipers must come out as measured (RC stand 13.15 / 16.2 / 9.15).
+- **Plane fits weight vertices by area and drop outliers.** Fine detail (embossed text) and
+  strips of a neighbouring fillet were pulling the top face of the calibration part 0.15 mm
+  high and tilting it. Depths and heights are now exact on design meshes.
+- **Slots and chamfers are features.** A closed slot (two half-round ends and two facing
+  walls) is filled in the base and cut afterwards; a narrow even bevel between two faces is
+  made sharp in the base and chamfered after the fillets, so it runs round filleted corners
+  as it would in CAD.
+- **A curved patch must turn like a cylinder.** Normals that lag steadily behind the arc
+  (measured in slices so noise averages out) mean flat stretches and tight corners, such as a
+  pocket end, a cone or a corner blend, posing as one cylinder.
+- **Calibration part** (`tools/calibration_part.py`): one print with every feature. Its top
+  edge chamfer and fillet run all the way round (CadQuery follows tangent edges), and the ramp
+  overhangs that chamfer by about 1 mm. Kept as printed.
+
 ## 2026-10-24 (real scans)
 - **Scan coverage is the user's job** (Zac). Fill gaps only from context: extended planes,
   measured wall thickness, closing an open end. When big regions were never scanned, say so
