@@ -1,6 +1,6 @@
 # Status
 
-_Last updated: 2026-10-24 (calibration part)_
+_Last updated: 2026-10-24 (merging top and bottom scans)_
 
 ## Done
 - **M0 scaffold:** API, mesh loading, viewer, Docker, CI.
@@ -65,10 +65,31 @@ _Last updated: 2026-10-24 (calibration part)_
   - the ramp's overhanging end, which leaves a top face that OpenCASCADE's mesher can't
     tessellate in memory (it does after STEP export).
 
+- **Merging two scans of one part** (`merge.py`; `/api/convert` takes an optional
+  `second_file`). A turntable scan sees one side; the user flips the part and scans again.
+  The second scan is placed on the first with no help from the user:
+  - starts from every way of matching the two scans' main face directions, with the boxes
+    lined up by ends or middles, then trimmed point-to-plane ICP;
+  - the pose is picked by overlap, plus how much of each scan's open rim the other carries
+    on from, less points left in open air in front of the other scan. Without the rim and air
+    terms a flat part merges with its bottom laid on its top;
+  - a final pass pins each scan's rim point to point to the other, which fixes the height
+    where both scans overlap only on upright walls (0.2 mm off before, 0.004 mm after);
+  - where both saw the surface, the first scan is kept.
+  On Zac's calibration print our merge matches the design at 96% within 0.3 mm (his
+  scanner software's merge: 62%, about 1 mm and 1.6 degrees off), and converts at 92% (his:
+  90%). Takes 30 to 80 s on 500k faces.
+- Bowed faces: the "mostly curved" check now measures a face's bow without stray points (a
+  seam, a sliver of the next face). The calibration print's underside is bowed about 0.45 mm
+  and was refused as curved before.
+
 ## Next (M2.5: real-scan readiness, agreed with Zac)
 - Thin walls: detect wall pairs, measure thickness, patch missing wall areas from it (bin).
 - Open and partial scans: close an open end with a plane; trim ragged rims.
-- Merge front and back scans of one part (cap) before converting.
+- Merge: try the cap's front and back; check the merged calibration scan's misses (the 3.4
+  mm hole, fillets and chamfers that don't apply on the scan).
+- Top-only scans (no underside) are refused: unmodelled partial fillets and the boss add up
+  past the 15% freeform limit. These belong with Thicken (M3).
 - Fewer spurious planes on warped real faces (RC stand gives about 1,000 faces).
 - Background jobs: a 2M-face scan takes 5 to 10 minutes.
 

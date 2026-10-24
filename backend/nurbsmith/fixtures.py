@@ -91,6 +91,36 @@ def rotated(mesh: trimesh.Trimesh, seed: int = 1) -> trimesh.Trimesh:
     return out
 
 
+def sides(mesh: trimesh.Trimesh, up=(0.0, 0.0, 1.0)):
+    """The part as a turntable scanner sees it from above and, turned over, from below: the
+    faces a ray from 30 or 60 degrees above (or below) the turntable reaches unblocked. The
+    two overlap only on the walls. Works on the faces as given, so pass the coarse CAD mesh
+    and subdivide each side afterwards."""
+    up = np.asarray(up, dtype=float)
+    side = np.cross(up, [1.0, 0.0, 0.0] if abs(up[0]) < 0.9 else [0.0, 1.0, 0.0])
+    side /= np.linalg.norm(side)
+    other = np.cross(up, side)
+    out = []
+    for sign in (1.0, -1.0):
+        seen = np.zeros(len(mesh.faces), dtype=bool)
+        for elevation in np.radians([30.0, 60.0]):
+            for azimuth in np.radians(np.arange(0.0, 360.0, 45.0)):
+                ray = np.cos(elevation) * (np.cos(azimuth) * side + np.sin(azimuth) * other)
+                ray = ray + sign * np.sin(elevation) * up
+                facing = mesh.face_normals @ ray > 0.05
+                idx = np.flatnonzero(facing & ~seen)
+                if not len(idx):
+                    continue
+                start = mesh.triangles_center[idx] + 1e-3 * mesh.face_normals[idx]
+                blocked = mesh.ray.intersects_any(start, np.tile(ray, (len(idx), 1)))
+                seen[idx[~blocked]] = True
+        part = mesh.copy()
+        part.update_faces(seen)
+        part.remove_unreferenced_vertices()
+        out.append(part)
+    return out[0], out[1]
+
+
 # ---------------------------------------------------------------------------------------------
 # Parts with curved features, built as real CAD and tessellated, so the ground truth is exact.
 # ---------------------------------------------------------------------------------------------

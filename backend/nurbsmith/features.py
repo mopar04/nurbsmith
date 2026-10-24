@@ -610,13 +610,14 @@ def _fillet_all(
 ) -> cq.Shape | None:
     """Every fillet in one operation, each edge with its own radius; None if it fails."""
     maker = BRepFilletAPI_MakeFillet(solid.wrapped)
-    for f in fillets:
-        edges = _edges_on(solid, by_id[f.planes[0]].plane, by_id[f.planes[1]].plane)
-        if not edges:
-            return None
-        for e in edges:
-            maker.Add(f.radius, e.wrapped)
+    edges = [_edges_on(solid, by_id[f.planes[0]].plane, by_id[f.planes[1]].plane) for f in fillets]
+    if not all(edges):
+        return None
     try:
+        # Add itself refuses some edges (one bounding only a sliver of a face).
+        for f, on in zip(fillets, edges, strict=True):
+            for e in on:
+                maker.Add(f.radius, e.wrapped)
         maker.Build()
         if not maker.IsDone():
             return None
